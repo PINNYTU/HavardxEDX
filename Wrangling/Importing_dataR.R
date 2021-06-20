@@ -1,0 +1,6 @@
+getwd()
+setwd()
+library(dslabs)
+data("murders")
+system.file("extdata",package="dslab")
+setwd("desktop/HavardxEDX/Havard-EDX/Wrangling/")
