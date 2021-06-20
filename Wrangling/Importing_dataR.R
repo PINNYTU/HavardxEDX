@@ -1,6 +1,11 @@
 getwd()
-setwd()
+
+######################In terminal######################
+
+#git clone https://github.com/rafalab/dslabs.git
+
+#####################################################
 library(dslabs)
-data("murders")
-system.file("extdata",package="dslab")
-setwd("desktop/HavardxEDX/Havard-EDX/Wrangling/")
+path<-system.file("extdata",package="dslabs")
+list.files(path)
+
