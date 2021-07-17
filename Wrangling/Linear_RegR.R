@@ -595,3 +595,379 @@ galton %>%
   do(tidy(lm(childHeight ~ parentHeight, data = .), conf.int = TRUE)) %>%
   filter(term == "parentHeight", pair == "mother_son") %>%
   pull(estimate)
+
+################################################
+library(reshape2)
+library(lpSolve)
+library(Lahman)
+# linear regression with two variables
+fit <- Teams %>% 
+  filter(yearID %in% 1961:2001) %>% 
+  mutate(BB = BB/G, HR = HR/G,  R = R/G) %>%  
+  lm(R ~ BB + HR, data = .)
+tidy(fit, conf.int = TRUE)
+
+# regression with BB, singles, doubles, triples, HR
+fit <- Teams %>% 
+  filter(yearID %in% 1961:2001) %>% 
+  mutate(BB = BB / G, 
+         singles = (H - X2B - X3B - HR) / G, 
+         doubles = X2B / G, 
+         triples = X3B / G, 
+         HR = HR / G,
+         R = R / G) %>%  
+  lm(R ~ BB + singles + doubles + triples + HR, data = .)
+coefs <- tidy(fit, conf.int = TRUE)
+coefs
+# predict number of runs for each team in 2002 and plot
+Teams %>% 
+  filter(yearID %in% 2002) %>% 
+  mutate(BB = BB/G, 
+         singles = (H-X2B-X3B-HR)/G, 
+         doubles = X2B/G, 
+         triples =X3B/G, 
+         HR=HR/G,
+         R=R/G)  %>% 
+  mutate(R_hat = predict(fit, newdata = .)) %>%
+  ggplot(aes(R_hat, R, label = teamID)) + 
+  geom_point() +
+  geom_text(nudge_x=0.1, cex = 2) + 
+  geom_abline()
+
+# average number of team plate appearances per game
+pa_per_game <- Batting %>% filter(yearID == 2002) %>% 
+  group_by(teamID) %>%
+  summarize(pa_per_game = sum(AB+BB)/max(G)) %>% 
+  pull(pa_per_game) %>% 
+  mean
+
+# compute per-plate-appearance rates for players available in 2002 using previous data
+players <- Batting %>% filter(yearID %in% 1999:2001) %>% 
+  group_by(playerID) %>%
+  mutate(PA = BB + AB) %>%
+  summarize(G = sum(PA)/pa_per_game,
+            BB = sum(BB)/G,
+            singles = sum(H-X2B-X3B-HR)/G,
+            doubles = sum(X2B)/G, 
+            triples = sum(X3B)/G, 
+            HR = sum(HR)/G,
+            AVG = sum(H)/sum(AB),
+            PA = sum(PA)) %>%
+  filter(PA >= 300) %>%
+  select(-G) %>%
+  mutate(R_hat = predict(fit, newdata = .))
+
+# plot player-specific predicted runs
+qplot(R_hat, data = players, geom = "histogram", binwidth = 0.5, color = I("black"))
+
+# add 2002 salary of each player
+players <- Salaries %>% 
+  filter(yearID == 2002) %>%
+  select(playerID, salary) %>%
+  right_join(players, by="playerID")
+
+# add defensive position
+position_names <- c("G_p","G_c","G_1b","G_2b","G_3b","G_ss","G_lf","G_cf","G_rf")
+tmp_tab <- Appearances %>% 
+  filter(yearID == 2002) %>% 
+  group_by(playerID) %>%
+  summarize_at(position_names, sum) %>%
+  ungroup()  
+pos <- tmp_tab %>%
+  select(position_names) %>%
+  apply(., 1, which.max) 
+players <- data_frame(playerID = tmp_tab$playerID, POS = position_names[pos]) %>%
+  mutate(POS = str_to_upper(str_remove(POS, "G_"))) %>%
+  filter(POS != "P") %>%
+  right_join(players, by="playerID") %>%
+  filter(!is.na(POS)  & !is.na(salary))
+
+# add players' first and last names
+players <- Master %>%
+  select(playerID, nameFirst, nameLast, debut) %>%
+  mutate(debut = as.Date(debut)) %>%
+  right_join(players, by="playerID")
+
+# top 10 players
+players %>% select(nameFirst, nameLast, POS, salary, R_hat) %>% 
+  arrange(desc(R_hat)) %>% 
+  top_n(10) 
+
+# players with a higher metric have higher salaries
+players %>% ggplot(aes(salary, R_hat, color = POS)) + 
+  geom_point() +
+  scale_x_log10()
+
+# remake plot without players that debuted after 1998
+library(lubridate)
+players %>% filter(year(debut) < 1998) %>%
+  ggplot(aes(salary, R_hat, color = POS)) + 
+  geom_point() +
+  scale_x_log10()
+
+####Assessment 1
+library(tidyverse)
+library(broom)
+library(Lahman)
+Teams_small <- Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, R_per_G= R/G) %>%
+  lm(avg_attendance ~  R_per_G, data=.) %>%
+  .$coef 
+Teams_small
+Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, hr_g= HR/G) %>%
+  lm(avg_attendance ~  hr_g, data=.) %>%
+  .$coef 
+#Q1b #predict win
+Teams %>% 
+  filter(yearID %in% 1961:2001) %>% 
+  mutate(avg_attendance = attendance/G) %>%
+  lm(avg_attendance ~ W, data=.) %>%
+  .$coef %>%
+  .[1] # x=0 , ans is intercept
+#Q1c #predict year
+Teams %>% 
+  filter(yearID %in% 1961:2001) %>% 
+  mutate(avg_attendance = attendance/G) %>%
+  lm(avg_attendance ~  yearID , data=.) %>%
+  .$coef 
+#Q2
+Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, R_per_G= R/G,W =W,hr_g= HR/G) %>%
+  summarize(r = cor(W, hr_g))
+Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, R_per_G= R/G,W =W,hr_g= HR/G) %>%
+  summarize(r = cor(W, R_per_G))
+#Q3a
+Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, W_strata=round(W/10))%>%
+  filter(W_strata >= 5 & W_strata <=10 ) %>%
+  group_by(W_strata) %>%
+  summarise(n()) 
+#Q3b
+Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, W_strata=round(W/10), R_per_game=R/G,BB_per_game=BB/G)%>%
+  filter(W_strata >= 5 & W_strata <=10 ) %>%
+  group_by(W_strata) %>%
+  summarize(slope = cor(avg_attendance, R_per_game)*sd(avg_attendance)/sd(R_per_game))
+Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, W_strata=round(W/10), R_per_game=R/G,BB_per_game=BB/G,HR_G=HR/G)%>%
+  filter(W_strata >= 5 & W_strata <=10 ) %>%
+  group_by(W_strata) %>%
+  summarize(slope = cor(avg_attendance, HR_G)*sd(avg_attendance)/sd(HR_G))
+
+
+# stratify by BB
+dat <- Teams %>% filter(yearID %in% 1961:2001) %>%
+  mutate(BB_strata = round(BB/G, 1), 
+         HR_per_game = HR / G,
+         R_per_game = R / G) %>%
+  filter(BB_strata >= 2.8 & BB_strata <=3.9) 
+
+# scatterplot for each BB stratum
+dat %>% ggplot(aes(HR_per_game, R_per_game)) +  
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  facet_wrap( ~ BB_strata)
+
+#Q4
+fit<-Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, R_per_G= R/G,W =W,hr_g= HR/G)%>%
+  lm(avg_attendance  ~  R_per_G+hr_g+W+yearID , data=.)
+#Q5
+5*322+1.2*1798+80*117 -456671
+Teams %>% 
+  filter(yearID %in% 2002 ) %>% 
+  mutate(avg_attendance = attendance/G, R_per_G= 5,W =80,hr_g= 1.2)%>%
+  mutate(avg_attendance_1 = predict(fit, newdata = .)) %>%
+  summarise(mean(avg_attendance_1))
+Teams %>% 
+  filter(yearID %in% 1960 ) %>% 
+  mutate(avg_attendance = attendance/G, R_per_G= 5,W =80,hr_g= 1.2)%>%
+  mutate(avg_attendance_2 = predict(fit, newdata = .))  %>%
+  summarise(mean(avg_attendance_2))
+#Q6
+cor1<-Teams %>% 
+  filter(yearID %in% 2002 ) %>% 
+  mutate(avg_attendance = attendance/G, R_per_G= 5,W =80,hr_g= 1.2)%>%
+  mutate(avg_attendance_1 = predict(fit, newdata = .)) 
+cor2<-Teams %>% 
+  filter(yearID %in% 2002 ) %>% 
+  mutate(avg_attendance = attendance/G,R_per_G= R/G,W =W,hr_g= HR/G) %>%
+  mutate(avg_attendance_predict = predict(fit, newdata = .)) %>%
+  summarise(r= cor(avg_attendance,avg_attendance_predict)) %>%
+  pull(r)
+########sophomore slump" ############ 
+library(Lahman)
+playerInfo <- Fielding %>%
+  group_by(playerID) %>%
+  arrange(desc(G)) %>%
+  slice(1) %>%
+  ungroup %>%
+  left_join(Master, by="playerID") %>%
+  select(playerID, nameFirst, nameLast, POS)
+
+#The code to create a table with only the ROY award winners and add their batting statistics:
+ROY <- AwardsPlayers %>%
+  filter(awardID == "Rookie of the Year") %>%
+  left_join(playerInfo, by="playerID") %>%
+  rename(rookie_year = yearID) %>%
+  right_join(Batting, by="playerID") %>%
+  mutate(AVG = H/AB) %>%
+  filter(POS != "P")
+#The code to keep only the rookie and sophomore seasons and remove players who did not play sophomore seasons:
+ROY <- ROY %>%
+  filter(yearID == rookie_year | yearID == rookie_year+1) %>%
+  group_by(playerID) %>%
+  mutate(rookie = ifelse(yearID == min(yearID), "rookie", "sophomore")) %>%
+  filter(n() == 2) %>%
+  ungroup %>%
+  select(playerID, rookie_year, rookie, nameFirst, nameLast, AVG)
+#The code to use the spread function to have one column for the rookie and sophomore years batting averages:
+ROY <- ROY %>% spread(rookie, AVG) %>% arrange(desc(rookie))
+ROY
+#The code to calculate the proportion of players who have a lower batting average their sophomore year:
+mean(ROY$sophomore - ROY$rookie <= 0)
+max(Batting$yearID)
+two_years <- Batting %>%
+  filter(yearID %in% 2012:2013) %>%
+  group_by(playerID, yearID) %>%
+  filter(sum(AB) >= 130) %>%
+  summarize(AVG = sum(H)/sum(AB)) %>%
+  ungroup %>%
+  spread(yearID, AVG) %>%
+  filter(!is.na(`2012`) & !is.na(`2013`)) %>%
+  left_join(playerInfo, by="playerID") %>%
+  filter(POS!="P") %>%
+  select(-POS) %>%
+  arrange(desc(`2013`)) %>%
+  select(nameFirst, nameLast, `2012`, `2013`)
+two_years
+
+arrange(two_years, `2013`)
+
+qplot(`2012`, `2013`, data = two_years)
+
+summarize(two_years, cor(`2012`,`2013`))
+
+######falling object
+library(dslabs)
+falling_object <- rfalling_object()
+falling_object %>%
+  ggplot(aes(time, observed_distance)) +
+  geom_point() +
+  ylab("Distance in meters") +
+  xlab("Time in seconds")
+
+fit <- falling_object %>%
+  mutate(time_sq = time^2) %>%
+  lm(observed_distance~time+time_sq, data=.)
+
+tidy(fit)
+
+augment(fit) %>%
+  ggplot() +
+  geom_point(aes(time, observed_distance)) +
+  geom_line(aes(time, .fitted), col = "blue")
+
+tidy(fit, conf.int = TRUE)
+
+#quiz 9a
+# linear regression with two variables
+fit <- Teams%>% 
+  filter(yearID=='1971') %>%
+  mutate(BB = BB/G, HR = HR/G,  R = R/G) %>%  
+  lm(R ~ BB + HR, data = .)
+tidy(fit, conf.int = TRUE)
+
+#quiz10
+res <- Teams %>%
+  filter(yearID %in% 1961:2018) %>%
+  group_by(yearID) %>%
+  do(tidy(lm(R ~ BB + HR, data = .))) %>%
+  ungroup() 
+res %>%
+  filter(term == "BB") %>%
+  ggplot(aes(yearID, estimate)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+res %>%
+  filter(term == "BB") %>%
+  lm(estimate ~ yearID, data = .) %>%
+  tidy() %>%
+  filter(term == "yearID") %>%
+  pull(estimate)
+
+res %>%
+  filter(term == "BB") %>%
+  lm(estimate ~ yearID, data = .) %>%
+  tidy() %>%
+  filter(term == "yearID") %>%
+  pull(p.value)
+
+############Confounding############
+# UC-Berkeley admission data
+library(dslabs)
+data(admissions)
+admissions
+
+# percent men and women accepted
+admissions %>% group_by(gender) %>% 
+  summarize(percentage = 
+              round(sum(admitted*applicants)/sum(applicants),1))
+
+# test whether gender and admission are independent
+admissions %>% group_by(gender) %>% 
+  summarize(total_admitted = round(sum(admitted / 100 * applicants)), 
+            not_admitted = sum(applicants) - sum(total_admitted)) %>%
+  select(-gender) %>% 
+  do(tidy(chisq.test(.)))
+
+# percent admissions by major
+admissions %>% select(major, gender, admitted) %>%
+  spread(gender, admitted) %>%
+  mutate(women_minus_men = women - men)
+
+# plot total percent admitted to major versus percent women applicants
+admissions %>% 
+  group_by(major) %>% 
+  summarize(major_selectivity = sum(admitted * applicants) / sum(applicants),
+            percent_women_applicants = sum(applicants * (gender=="women")) /
+              sum(applicants) * 100) %>%
+  ggplot(aes(major_selectivity, percent_women_applicants, label = major)) +
+  geom_text()
+
+# plot number of applicants admitted and not
+admissions %>%
+  mutate(yes = round(admitted/100*applicants), no = applicants - yes) %>%
+  select(-applicants, -admitted) %>%
+  gather(admission, number_of_students, -c("major", "gender")) %>%
+  ggplot(aes(gender, number_of_students, fill = admission)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(. ~ major)
+
+admissions %>% 
+  mutate(percent_admitted = admitted * applicants/sum(applicants)) %>%
+  ggplot(aes(gender, y = percent_admitted, fill = major)) +
+  geom_bar(stat = "identity", position = "stack")
+
+# condition on major and then look at differences
+admissions %>% ggplot(aes(major, admitted, col = gender, size = applicants)) + geom_point()
+
+# average difference by major
+admissions %>%  group_by(gender) %>% summarize(average = mean(admitted))
+
+######Assestment Quiz1######
+library(dslabs)
+data("research_funding_rates")
+research_funding_rates
+
