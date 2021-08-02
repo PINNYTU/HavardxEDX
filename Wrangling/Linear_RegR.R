@@ -762,8 +762,19 @@ Teams %>%
   filter(W_strata >= 5 & W_strata <=10 ) %>%
   group_by(W_strata) %>%
   summarize(slope = cor(avg_attendance, HR_G)*sd(avg_attendance)/sd(HR_G))
-
-
+#Q3c
+dat<-Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(avg_attendance = attendance/G, W_strata=round(W/10), R_per_game=R/G,BB_per_game=BB/G,HR_G=HR/G)%>%
+  filter(W_strata >= 5 & W_strata <=10 ) 
+dat %>% ggplot(aes(HR_G, avg_attendance)) +  
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  facet_wrap( ~ W_strata)
+dat %>% ggplot(aes(R_per_game, avg_attendance)) +  
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  facet_wrap( ~ W_strata)
 # stratify by BB
 dat <- Teams %>% filter(yearID %in% 1961:2001) %>%
   mutate(BB_strata = round(BB/G, 1), 
@@ -966,7 +977,7 @@ admissions %>% ggplot(aes(major, admitted, col = gender, size = applicants)) + g
 # average difference by major
 admissions %>%  group_by(gender) %>% summarize(average = mean(admitted))
 
-######Assestment Quiz1######
+######Assestment Quiz2######
 library(dslabs)
 data("research_funding_rates")
 research_funding_rates
